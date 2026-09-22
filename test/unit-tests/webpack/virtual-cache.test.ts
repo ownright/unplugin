@@ -98,4 +98,18 @@ describe('webpack virtual module cache', () => {
     expect(resolveId.mock.calls.map(call => call[0])).not.toContain(virtualId)
     expect(readFileSync(resolve(context, 'dist/main.js'), 'utf8')).toContain('virtual-ok')
   })
+
+  it('does not overwrite an on-disk file that shares the _virtual_ prefix', async () => {
+    const context = createContext()
+    writeFileSync(resolve(context, '_virtual_helper.js'), 'export default "real-file-ok"\n')
+    writeFileSync(
+      resolve(context, 'entry.js'),
+      `import virtual from '${virtualId}'\nimport real from './_virtual_helper.js'\nexport default { virtual, real }\n`,
+    )
+    const resolveId = vi.fn((id: string) => id === virtualId ? virtualId : undefined)
+    await runWebpack(context, [createPlugin(resolveId)])
+    const bundle = readFileSync(resolve(context, 'dist/main.js'), 'utf8')
+    expect(bundle).toContain('virtual-ok')
+    expect(bundle).toContain('real-file-ok')
+  })
 })

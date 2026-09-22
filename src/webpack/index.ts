@@ -40,12 +40,22 @@ function virtualInputFileSystem(compiler: WebpackCompiler): VirtualInputFileSyst
 function ensureVirtualModule(plugin: ResolvedUnpluginOptions, compiler: WebpackCompiler, file: string | undefined) {
   if (!file || !plugin.__vfs)
     return
-  const resource = normalizeAbsolutePath(file.split('?')[0])
+  const resource = normalizeAbsolutePath(file.split('?')[0].split('#')[0])
   if (!resource.startsWith(plugin.__virtualModulePrefix))
     return
-  const input = virtualInputFileSystem(compiler)
-  if (input?._virtualFiles && Object.hasOwn(input._virtualFiles, resource))
+  // The prefix is `<context>/_virtual_` with no trailing separator, so a real
+  // file such as `_virtual_helper.js` also matches. resolveId already skipped
+  // those with existsSync; buildModule must too or writeModule('') shadows them.
+  if (fs.existsSync(resource))
     return
+  const input = virtualInputFileSystem(compiler)
+  if (input?._virtualFiles) {
+    if (Object.hasOwn(input._virtualFiles, resource))
+      return
+  }
+  else if (plugin.__vfsModules instanceof Set && plugin.__vfsModules.has(resource)) {
+    return
+  }
   plugin.__vfs.writeModule(resource, '')
   if (plugin.__vfsModules instanceof Set)
     plugin.__vfsModules.add(resource)
