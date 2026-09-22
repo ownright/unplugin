@@ -27,6 +27,7 @@ interface VirtualInputFileSystem {
   _virtualFiles?: Record<string, unknown>
 }
 
+/** Innermost webpack input filesystem — the one that holds `_virtualFiles`. */
 function virtualInputFileSystem(compiler: WebpackCompiler): VirtualInputFileSystem | undefined {
   let input = compiler.inputFileSystem as VirtualInputFileSystem | undefined
   while (input?._inputFileSystem)
@@ -34,9 +35,12 @@ function virtualInputFileSystem(compiler: WebpackCompiler): VirtualInputFileSyst
   return input
 }
 
-// A restored webpack module already points at the virtual path, and the file
-// exists only in memory. Create it again before the read when this process
-// does not have it, including when resolveId does not run.
+/**
+ * Recreate a missing in-memory virtual file before webpack reads it.
+ * A restored module already points at the `_virtual_` path, and that file
+ * exists only in memory, so a later process ENOENTs unless this runs even
+ * when `resolveId` does not.
+ */
 function ensureVirtualModule(plugin: ResolvedUnpluginOptions, compiler: WebpackCompiler, file: string | undefined) {
   if (!file || !plugin.__vfs)
     return
@@ -56,6 +60,7 @@ function ensureVirtualModule(plugin: ResolvedUnpluginOptions, compiler: WebpackC
     plugin.__vfsModules.add(resource)
 }
 
+/** Webpack adapter for an unplugin factory. */
 export function getWebpackPlugin<UserOptions = Record<string, never>>(
   factory: UnpluginFactory<UserOptions>,
 ): UnpluginInstance<UserOptions>['webpack'] {

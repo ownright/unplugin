@@ -8,6 +8,7 @@ import webpack from 'webpack'
 const virtualId = '~demo'
 const virtualSource = 'export default "virtual-ok"\n'
 
+/** Test plugin that serves `~demo` as a virtual module. */
 function createPlugin(resolveId: (id: string) => string | undefined) {
   return createUnplugin(() => ({
     name: 'virtual-cache-test',
@@ -19,6 +20,7 @@ function createPlugin(resolveId: (id: string) => string | undefined) {
   })).webpack()
 }
 
+/** Development webpack compiler for a temp context and the given plugins. */
 function createCompiler(context: string, plugins: webpack.WebpackPluginInstance[]) {
   return webpack({
     mode: 'development',
@@ -32,6 +34,7 @@ function createCompiler(context: string, plugins: webpack.WebpackPluginInstance[
   })
 }
 
+/** Run one webpack compilation and reject on errors. */
 function runCompiler(compiler: webpack.Compiler) {
   return new Promise<void>((done, reject) => {
     compiler.run((error, stats) => {
@@ -45,6 +48,7 @@ function runCompiler(compiler: webpack.Compiler) {
   })
 }
 
+/** Close the compiler so later tests can reuse the same process. */
 function closeCompiler(compiler: webpack.Compiler) {
   return new Promise<void>((done, reject) => {
     compiler.close((error) => {
@@ -56,11 +60,16 @@ function closeCompiler(compiler: webpack.Compiler) {
   })
 }
 
+/** Compile once and always close the compiler. */
 function runWebpack(context: string, plugins: webpack.WebpackPluginInstance[]) {
   const compiler = createCompiler(context, plugins)
   return runCompiler(compiler).finally(() => closeCompiler(compiler))
 }
 
+/**
+ * Drop webpack-virtual-modules' in-memory map, matching a new process that
+ * reused the on-disk cache.
+ */
 function wipeInMemoryVirtualFiles(compiler: webpack.Compiler) {
   let input = compiler.inputFileSystem as { _inputFileSystem?: unknown, _virtualFiles?: unknown, purge?: () => void } | undefined
   while (input?._inputFileSystem)
@@ -71,8 +80,10 @@ function wipeInMemoryVirtualFiles(compiler: webpack.Compiler) {
   input.purge?.()
 }
 
-// Mirrors webpack's resolver cache: the cached request is already the virtual
-// path, so resolveId does not run, and the in-memory file is gone.
+/**
+ * Skip `resolveId` by returning the `_virtual_` path as if webpack had cached
+ * it. The in-memory file is gone, which is the restart ENOENT case.
+ */
 function cachedResolvePlugin(): webpack.WebpackPluginInstance {
   return {
     apply(compiler) {
@@ -102,6 +113,7 @@ describe('webpack virtual module cache', () => {
     contexts.length = 0
   })
 
+  /** Temp project with an entry that imports the virtual module. */
   function createContext() {
     const context = resolve(tmpdir(), `unplugin-virtual-cache-${Date.now()}-${Math.random().toString(16).slice(2)}`)
     mkdirSync(context, { recursive: true })
