@@ -21,6 +21,36 @@ const LOAD_LOADER = resolve(
   import.meta.dirname,
   import.meta.dev ? '../../dist/webpack/loaders/load.mjs' : 'webpack/loaders/load.mjs',
 )
+
+interface VirtualInputFileSystem {
+  _inputFileSystem?: VirtualInputFileSystem
+  _virtualFiles?: Record<string, unknown>
+}
+
+function virtualInputFileSystem(compiler: WebpackCompiler): VirtualInputFileSystem | undefined {
+  let input = compiler.inputFileSystem as VirtualInputFileSystem | undefined
+  while (input?._inputFileSystem)
+    input = input._inputFileSystem
+  return input
+}
+
+// A restored webpack module already points at the virtual path, and the file
+// exists only in memory. Create it again before the read when this process
+// does not have it, including when resolveId does not run.
+function ensureVirtualModule(plugin: ResolvedUnpluginOptions, compiler: WebpackCompiler, file: string | undefined) {
+  if (!file || !plugin.__vfs)
+    return
+  const resource = normalizeAbsolutePath(file.split('?')[0])
+  if (!resource.startsWith(plugin.__virtualModulePrefix))
+    return
+  const input = virtualInputFileSystem(compiler)
+  if (input?._virtualFiles && Object.hasOwn(input._virtualFiles, resource))
+    return
+  plugin.__vfs.writeModule(resource, '')
+  if (plugin.__vfsModules instanceof Set)
+    plugin.__vfsModules.add(resource)
+}
+
 export function getWebpackPlugin<UserOptions = Record<string, never>>(
   factory: UnpluginFactory<UserOptions>,
 ): UnpluginInstance<UserOptions>['webpack'] {
@@ -65,6 +95,12 @@ export function getWebpackPlugin<UserOptions = Record<string, never>>(
             const vfsModules = new Set<string>()
             plugin.__vfsModules = vfsModules
             plugin.__vfs = vfs
+
+            compiler.hooks.compilation.tap(plugin.name, (compilation) => {
+              compilation.hooks.buildModule.tap(plugin.name, (module) => {
+                ensureVirtualModule(plugin, compiler, (module as { resource?: string }).resource)
+              })
+            })
 
             const resolverPlugin: ResolvePluginInstance = {
               apply(resolver: Resolver) {
@@ -142,10 +178,9 @@ export function getWebpackPlugin<UserOptions = Record<string, never>>(
 
                       // webpack virtual module should pass in the correct path
                       // https://github.com/unjs/unplugin/pull/155
-                      if (!vfsModules.has(resolved)) {
-                        plugin.__vfs!.writeModule(resolved, '')
-                        vfsModules.add(resolved)
-                      }
+                      // The in-memory file can be gone even when this id was seen
+                      // before, so presence in vfsModules is not enough.
+                      ensureVirtualModule(plugin, compiler, resolved)
                     }
 
                     // construct the new request
