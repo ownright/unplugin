@@ -19,29 +19,56 @@ function createPlugin(resolveId: (id: string) => string | undefined) {
   })).webpack()
 }
 
-function runWebpack(context: string, plugins: webpack.WebpackPluginInstance[]) {
+function createCompiler(context: string, plugins: webpack.WebpackPluginInstance[]) {
+  return webpack({
+    mode: 'development',
+    context,
+    entry: resolve(context, 'entry.js'),
+    output: {
+      path: resolve(context, 'dist'),
+      filename: 'main.js',
+    },
+    plugins,
+  })
+}
+
+function runCompiler(compiler: webpack.Compiler) {
   return new Promise<void>((done, reject) => {
-    const compiler = webpack({
-      mode: 'development',
-      context,
-      entry: resolve(context, 'entry.js'),
-      output: {
-        path: resolve(context, 'dist'),
-        filename: 'main.js',
-      },
-      plugins,
-    })
     compiler.run((error, stats) => {
-      compiler.close(() => {
-        if (error)
-          reject(error)
-        else if (stats?.hasErrors())
-          reject(new Error(stats.toString({ errors: true, errorDetails: true })))
-        else
-          done()
-      })
+      if (error)
+        reject(error)
+      else if (stats?.hasErrors())
+        reject(new Error(stats.toString({ errors: true, errorDetails: true })))
+      else
+        done()
     })
   })
+}
+
+function closeCompiler(compiler: webpack.Compiler) {
+  return new Promise<void>((done, reject) => {
+    compiler.close((error) => {
+      if (error)
+        reject(error)
+      else
+        done()
+    })
+  })
+}
+
+function runWebpack(context: string, plugins: webpack.WebpackPluginInstance[]) {
+  const compiler = createCompiler(context, plugins)
+  return runCompiler(compiler).finally(() => closeCompiler(compiler))
+}
+
+function wipeInMemoryVirtualFiles(compiler: webpack.Compiler) {
+  let input = compiler.inputFileSystem as { _inputFileSystem?: unknown, _virtualFiles?: unknown, purge?: () => void } | undefined
+  while (input?._inputFileSystem)
+    input = input._inputFileSystem as typeof input
+  if (!input)
+    return
+  delete input._virtualFiles
+  input.purge?.()
 }
 
 // Mirrors webpack's resolver cache: the cached request is already the virtual
@@ -95,6 +122,22 @@ describe('webpack virtual module cache', () => {
     const context = createContext()
     const resolveId = vi.fn((id: string) => id === virtualId ? virtualId : undefined)
     await runWebpack(context, [cachedResolvePlugin(), createPlugin(resolveId)])
+    expect(resolveId.mock.calls.map(call => call[0])).not.toContain(virtualId)
+    expect(readFileSync(resolve(context, 'dist/main.js'), 'utf8')).toContain('virtual-ok')
+  })
+
+  it('recreates the virtual file after the in-memory map is cleared', async () => {
+    const context = createContext()
+    const resolveId = vi.fn((id: string) => id === virtualId ? virtualId : undefined)
+    const compiler = createCompiler(context, [cachedResolvePlugin(), createPlugin(resolveId)])
+    try {
+      await runCompiler(compiler)
+      wipeInMemoryVirtualFiles(compiler)
+      await runCompiler(compiler)
+    }
+    finally {
+      await closeCompiler(compiler)
+    }
     expect(resolveId.mock.calls.map(call => call[0])).not.toContain(virtualId)
     expect(readFileSync(resolve(context, 'dist/main.js'), 'utf8')).toContain('virtual-ok')
   })

@@ -49,13 +49,8 @@ function ensureVirtualModule(plugin: ResolvedUnpluginOptions, compiler: WebpackC
   if (fs.existsSync(resource))
     return
   const input = virtualInputFileSystem(compiler)
-  if (input?._virtualFiles) {
-    if (Object.hasOwn(input._virtualFiles, resource))
-      return
-  }
-  else if (plugin.__vfsModules instanceof Set && plugin.__vfsModules.has(resource)) {
+  if (input?._virtualFiles && Object.hasOwn(input._virtualFiles, resource))
     return
-  }
   plugin.__vfs.writeModule(resource, '')
   if (plugin.__vfsModules instanceof Set)
     plugin.__vfsModules.add(resource)
@@ -188,8 +183,6 @@ export function getWebpackPlugin<UserOptions = Record<string, never>>(
 
                       // webpack virtual module should pass in the correct path
                       // https://github.com/unjs/unplugin/pull/155
-                      // The in-memory file can be gone even when this id was seen
-                      // before, so presence in vfsModules is not enough.
                       ensureVirtualModule(plugin, compiler, resolved)
                     }
 
